@@ -141,6 +141,31 @@ static int is_primary_interface(const char *ifname)
     return 0;
 }
 
+#ifdef SAMSUNG_WIFI
+char* get_samsung_wifi_type()
+{
+    char buf[10];
+    int fd = open("/data/.cid.info", O_RDONLY);
+    if (fd < 0)
+        return NULL;
+
+    if (read(fd, buf, sizeof(buf)) < 0) {
+        close(fd);
+        return NULL;
+    }
+
+    close(fd);
+
+    if (strncmp(buf, "murata", 6) == 0)
+        return "_murata";
+
+    if (strncmp(buf, "semcove", 7) == 0)
+        return "_semcove";
+
+    return NULL;
+}
+#endif
+
 static int insmod(const char *filename, const char *args)
 {
     void *module;
@@ -241,6 +266,7 @@ int wifi_load_driver()
 #ifdef WIFI_DRIVER_MODULE_PATH
     char driver_status[PROPERTY_VALUE_MAX];
     int count = 100; /* wait at most 20 seconds for completion */
+    char module_arg[256];
 
     if (is_wifi_driver_loaded()) {
         return 0;
@@ -254,7 +280,14 @@ int wifi_load_driver()
     usleep(200000);
 #endif
 
+#ifdef SAMSUNG_WIFI
+    char* type = get_samsung_wifi_type();
+    snprintf(module_arg, sizeof(module_arg), "%s%s", DRIVER_MODULE_ARG, type == NULL ? "" : type);
+
+    if (insmod(DRIVER_MODULE_PATH, module_arg) < 0) {
+#else
     if (insmod(DRIVER_MODULE_PATH, DRIVER_MODULE_ARG) < 0) {
+#endif
 #ifdef WIFI_EXT_MODULE_NAME
         rmmod(EXT_MODULE_NAME);
 #endif
