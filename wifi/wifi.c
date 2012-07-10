@@ -83,6 +83,18 @@ static char primary_iface[PROPERTY_VALUE_MAX];
 #define WIFI_DRIVER_FW_PATH_P2P		NULL
 #endif
 
+#ifdef WIFI_EXT_MODULE_NAME
+static const char EXT_MODULE_NAME[] = WIFI_EXT_MODULE_NAME;
+#ifdef WIFI_EXT_MODULE_ARG
+static const char EXT_MODULE_ARG[] = WIFI_EXT_MODULE_ARG;
+#else
+static const char EXT_MODULE_ARG[] = "";
+#endif
+#endif
+#ifdef WIFI_EXT_MODULE_PATH
+static const char EXT_MODULE_PATH[] = WIFI_EXT_MODULE_PATH;
+#endif
+
 #ifndef WIFI_DRIVER_FW_PATH_PARAM
 #define WIFI_DRIVER_FW_PATH_PARAM	"/sys/module/wlan/parameters/fwpath"
 #endif
@@ -128,6 +140,31 @@ static int is_primary_interface(const char *ifname)
     }
     return 0;
 }
+
+#ifdef SAMSUNG_WIFI
+char* get_samsung_wifi_type()
+{
+    char buf[10];
+    int fd = open("/data/.cid.info", O_RDONLY);
+    if (fd < 0)
+        return NULL;
+
+    if (read(fd, buf, sizeof(buf)) < 0) {
+        close(fd);
+        return NULL;
+    }
+
+    close(fd);
+
+    if (strncmp(buf, "murata", 6) == 0)
+        return "_murata";
+
+    if (strncmp(buf, "semcove", 7) == 0)
+        return "_semcove";
+
+    return NULL;
+}
+#endif
 
 static int insmod(const char *filename, const char *args)
 {
@@ -229,13 +266,33 @@ int wifi_load_driver()
 #ifdef WIFI_DRIVER_MODULE_PATH
     char driver_status[PROPERTY_VALUE_MAX];
     int count = 100; /* wait at most 20 seconds for completion */
+    char module_arg[256];
 
     if (is_wifi_driver_loaded()) {
         return 0;
     }
 
-    if (insmod(DRIVER_MODULE_PATH, DRIVER_MODULE_ARG) < 0)
+    property_set(DRIVER_PROP_NAME, "loading");
+
+#ifdef WIFI_EXT_MODULE_PATH
+    if (insmod(EXT_MODULE_PATH, EXT_MODULE_ARG) < 0)
         return -1;
+    usleep(200000);
+#endif
+
+#ifdef SAMSUNG_WIFI
+    char* type = get_samsung_wifi_type();
+    snprintf(module_arg, sizeof(module_arg), "%s%s", DRIVER_MODULE_ARG, type == NULL ? "" : type);
+
+    if (insmod(DRIVER_MODULE_PATH, module_arg) < 0) {
+#else
+    if (insmod(DRIVER_MODULE_PATH, DRIVER_MODULE_ARG) < 0) {
+#endif
+#ifdef WIFI_EXT_MODULE_NAME
+        rmmod(EXT_MODULE_NAME);
+#endif
+        return -1;
+    }
 
     if (strcmp(FIRMWARE_LOADER,"") == 0) {
         /* usleep(WIFI_DRIVER_LOADER_DELAY); */
@@ -278,6 +335,9 @@ int wifi_unload_driver()
         }
         usleep(500000); /* allow card removal */
         if (count) {
+#ifdef WIFI_EXT_MODULE_NAME
+            if (rmmod(EXT_MODULE_NAME) == 0)
+#endif
             return 0;
         }
         return -1;
@@ -870,6 +930,14 @@ int wifi_change_fw_path(const char *fwpath)
 
     if (!fwpath)
         return ret;
+
+    if (!is_wifi_driver_loaded()) {
+        LOGD("Loading wifi driver so that we may set the fw path");
+        if (wifi_load_driver() != 0) {
+            LOGE("Could not load wifi driver!");
+        }
+    }
+
     fd = TEMP_FAILURE_RETRY(open(WIFI_DRIVER_FW_PATH_PARAM, O_WRONLY));
     if (fd < 0) {
         ALOGE("Failed to open wlan fw path param (%s)", strerror(errno));
