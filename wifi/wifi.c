@@ -37,6 +37,9 @@
 #include <sys/_system_properties.h>
 #endif
 
+#define LOGE ALOGE
+#define LOGD ALOGD
+
 /* PRIMARY refers to the connection on the primary interface
  * SECONDARY refers to an optional connection on a p2p interface
  *
